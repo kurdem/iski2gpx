@@ -104,3 +104,90 @@ def test_rate_limit_per_client_ip_behind_proxy(monkeypatch):
     assert c.post("/convert", data={"url": URL}, headers=h1).status_code == 200
     assert c.post("/convert", data={"url": URL}, headers=h1).status_code == 429
     assert c.post("/convert", data={"url": URL}, headers=h2).status_code == 200
+
+
+# ------------------------------------------------------------------ Batch
+
+import io as _io
+import zipfile as _zip
+
+
+def _upload(client, text, name="urls.txt"):
+    return client.post("/batch", data={"file": (_io.BytesIO(text.encode()), name)},
+                       content_type="multipart/form-data")
+
+
+@pytest.fixture
+def bmod(monkeypatch):
+    monkeypatch.setenv("BATCH_DELAY", "0")
+    monkeypatch.setenv("BATCH_RATE_LIMIT", "100 per minute")
+    monkeypatch.setenv("MAX_BATCH", "5")
+    import app as a
+    a = importlib.reload(a)
+
+    def fake_get(url, **kw):
+        return FakeResp(404) if "/404/" in url else FakeResp(200, TRACK)
+
+    monkeypatch.setattr(a.requests, "get", fake_get)
+    return a
+
+
+def _token(html: bytes) -> str:
+    import re
+    return re.search(rb'href="batch/([A-Za-z0-9_-]+)/zip"', html).group(1).decode()
+
+
+def test_batch_upload_zip_and_single(bmod):
+    c = bmod.app.test_client()
+    r = _upload(c, "# x\nhttps://www.iski.app/track/view/1/ab\n\nhttps://www.iski.app/track/view/2/ab\n"
+                   "https://www.iski.app/track/view/404/ab\nkaputt\n")
+    assert r.status_code == 200
+    assert b"2 von 4 Tracks konvertiert" in r.data
+    tok = _token(r.data)
+
+    z = c.get(f"/batch/{tok}/zip")
+    assert z.status_code == 200 and z.mimetype == "application/zip"
+    names = sorted(_zip.ZipFile(_io.BytesIO(z.data)).namelist())
+    assert names == ["fehler.txt",
+                     "iski_1_skiliftkarussell_winterberg_2025-11-30.gpx",
+                     "iski_2_skiliftkarussell_winterberg_2025-11-30.gpx"]
+
+    one = c.get(f"/batch/{tok}/1")
+    assert one.status_code == 200
+    assert "iski_2_" in one.headers["Content-Disposition"]
+    xml.dom.minidom.parseString(one.data)
+    assert c.get(f"/batch/{tok}/9").status_code == 404
+    assert c.get("/batch/unbekannt/zip").status_code == 404
+
+
+def test_batch_duplicate_names(bmod):
+    c = bmod.app.test_client()
+    r = _upload(c, "https://www.iski.app/track/view/1/ab\nhttps://www.iski.app/track/view/1/cd\n")
+    names = _zip.ZipFile(_io.BytesIO(c.get(f"/batch/{_token(r.data)}/zip").data)).namelist()
+    assert sorted(names) == ["iski_1_skiliftkarussell_winterberg_2025-11-30.gpx",
+                             "iski_1_skiliftkarussell_winterberg_2025-11-30_2.gpx"]
+
+
+def test_batch_limits(bmod):
+    c = bmod.app.test_client()
+    many = "\n".join(f"https://www.iski.app/track/view/{i}/ab" for i in range(6))
+    assert _upload(c, many).status_code == 400
+    assert _upload(c, "# nur Kommentar\n").status_code == 400
+    assert c.post("/batch", data={}, content_type="multipart/form-data").status_code == 400
+    big = "x" * (70 * 1024)
+    assert _upload(c, big).status_code == 413
+
+
+def test_batch_expired(bmod, monkeypatch):
+    c = bmod.app.test_client()
+    tok = _token(_upload(c, "https://www.iski.app/track/view/1/ab\n").data)
+    monkeypatch.setattr(bmod, "RESULT_TTL", -1)
+    assert c.get(f"/batch/{tok}/zip").status_code == 404
+
+
+def test_batch_deadline(bmod, monkeypatch):
+    monkeypatch.setattr(bmod, "BATCH_DEADLINE", -1)
+    c = bmod.app.test_client()
+    r = _upload(c, "https://www.iski.app/track/view/1/ab\n")
+    assert "Zeitlimit".encode() in r.data
+    assert b"0 von 1" in r.data

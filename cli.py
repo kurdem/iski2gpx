@@ -16,14 +16,7 @@ import app as core
 
 def read_urls(path: str) -> list[str]:
     with (sys.stdin if path == "-" else open(path, encoding="utf-8-sig")) as f:
-        lines = [ln.strip() for ln in f]
-    urls, seen = [], set()
-    for ln in lines:
-        if not ln or ln.startswith("#") or ln in seen:
-            continue
-        seen.add(ln)
-        urls.append(ln)
-    return urls
+        return core.parse_url_list(f.read())
 
 
 def unique_path(outdir: str, name: str) -> str:
@@ -62,14 +55,11 @@ def main(argv=None) -> int:
             time.sleep(a.delay)
         prefix = f"[{i}/{len(urls)}]"
         try:
-            track_id, sig = core.parse_url(url)
-            t = core.fetch_track(track_id, sig)
-            gpx = core.to_gpx(t)
+            name, gpx = core.convert_url(url)
         except core.ConvertError as e:
             failed.append((url, str(e)))
             print(f"{prefix} FEHLER {url}: {e}", file=sys.stderr)
             continue
-        name = core.filename(t, track_id)
         path = os.path.join(a.outdir, name) if a.overwrite else unique_path(a.outdir, name)
         with open(path, "w", encoding="utf-8") as f:
             f.write(gpx)

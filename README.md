@@ -1,6 +1,7 @@
 # iski2gpx
 
-Web-UI: öffentlichen iSKI-Track-Link einfügen → GPX-Download.
+Web-UI: öffentlichen iSKI-Track-Link einfügen → GPX-Download,
+oder TXT-Datei mit mehreren Links hochladen → Ergebnisliste mit Einzel-Downloads und ZIP.
 
 ## Lokal (Docker)
 
@@ -14,7 +15,14 @@ Direktaufruf:
 curl -OJ "http://localhost:8080/convert?url=https://www.iski.app/track/view/5797606/78eb5c4d04295af1"
 ```
 
-## Batch: Textdatei mit URLs
+## Batch im Browser
+
+TXT-Datei hochladen (eine URL pro Zeile, `#` = Kommentar, max. 50).
+Danach: Tabelle mit Status je URL, Einzel-Download je Track, „Alle als ZIP“
+(inkl. `fehler.txt`, falls URLs fehlschlugen). Ergebnisse liegen 30 Minuten im
+Arbeitsspeicher und sind über einen zufälligen Token abrufbar.
+
+## Batch per CLI: Textdatei mit URLs
 
 `urls.txt` – eine URL pro Zeile, `#` = Kommentar, Leerzeilen/Duplikate werden ignoriert.
 
@@ -96,8 +104,16 @@ Test: Portal → Monitor → Action groups → `ag-iski2gpx-killswitch` → *Tes
 | `RATE_LIMIT` | `10 per minute` | Limit pro Client-IP für `/convert` |
 | `TRUSTED_PROXIES` | `0` | Anzahl Proxies vor der App (Azure: `1`) für korrekte Client-IP |
 | `HTTP_TIMEOUT` | `20` | Timeout zur iSKI-API in s |
+| `BATCH_RATE_LIMIT` | `3 per 10 minutes` | Limit pro Client-IP für Uploads |
+| `MAX_BATCH` | `50` | Max. URLs pro Upload |
+| `BATCH_DELAY` | `0.3` | Pause zwischen iSKI-Abrufen im Batch (s) |
+| `BATCH_DEADLINE` | `180` | Max. Laufzeit eines Uploads (s); Rest wird als übersprungen markiert |
+| `RESULT_TTL` | `1800` | Aufbewahrung der Batch-Ergebnisse (s) |
+| `MAX_STORED_BATCHES` | `20` | Max. gleichzeitig gehaltene Batch-Ergebnisse |
+| `MAX_UPLOAD_BYTES` | `65536` | Max. Größe der TXT-Datei |
 
-Das Rate Limit zählt im Speicher → 1 gunicorn-Worker und max. 1 Replica.
+Rate Limit und Batch-Ergebnisse liegen im Speicher → 1 gunicorn-Worker und max. 1 Replica.
+Bei Scale-to-zero (nach Leerlauf) gehen gehaltene Batch-Ergebnisse verloren.
 
 ### Logs
 
