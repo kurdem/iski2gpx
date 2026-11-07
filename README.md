@@ -32,6 +32,8 @@ Architektur: GitHub Actions → Tests → Image nach `ghcr.io/kurdem/iski2gpx` �
    ```bash
    git clone https://github.com/kurdem/iski2gpx && cd iski2gpx
    bash infra/setup-azure.sh
+   # optional mit Budget-Alarm (Mail bei 80 %/100 % Ist und 100 % Prognose):
+   BUDGET_EMAIL=ich@example.com BUDGET_AMOUNT=5 bash infra/setup-azure.sh
    ```
 2. Ausgegebene Werte als GitHub Actions Secrets eintragen (falls nicht automatisch per `gh` gesetzt):
    `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`

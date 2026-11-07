@@ -12,6 +12,11 @@ APP="${APP:-iski2gpx}"
 GH_REPO="${GH_REPO:-kurdem/iski2gpx}"
 GH_BRANCH="${GH_BRANCH:-main}"
 SP_NAME="${SP_NAME:-gh-iski2gpx-deploy}"
+# Optional: Budget-Alarm auf der Resource Group (leer = überspringen)
+#   BUDGET_EMAIL=ich@example.com BUDGET_AMOUNT=5 bash infra/setup-azure.sh
+BUDGET_EMAIL="${BUDGET_EMAIL:-}"
+BUDGET_AMOUNT="${BUDGET_AMOUNT:-5}"
+BUDGET_NAME="${BUDGET_NAME:-budget-iski2gpx}"
 # Platzhalter bis zum ersten GitHub-Deploy (lauscht auf 80, Ingress zeigt schon auf 8080)
 PLACEHOLDER_IMAGE="mcr.microsoft.com/k8se/quickstart:latest"
 
@@ -77,6 +82,29 @@ for i in 1 2 3 4 5 6; do
   fi
   echo "   warte auf Replikation ($i/6) ..."; sleep 15
 done
+
+if [ -n "$BUDGET_EMAIL" ]; then
+  echo ">> Budget $BUDGET_NAME: $BUDGET_AMOUNT/Monat auf $RG, Alarm an $BUDGET_EMAIL"
+  # Startdatum muss der 1. des aktuellen Monats sein; PUT ist idempotent.
+  START_DATE=$(date -u +%Y-%m-01T00:00:00Z)
+  az rest --method put -o none \
+    --url "https://management.azure.com${RG_ID}/providers/Microsoft.Consumption/budgets/${BUDGET_NAME}?api-version=2023-05-01" \
+    --body "{
+      \"properties\": {
+        \"category\": \"Cost\",
+        \"amount\": ${BUDGET_AMOUNT},
+        \"timeGrain\": \"Monthly\",
+        \"timePeriod\": { \"startDate\": \"${START_DATE}\" },
+        \"notifications\": {
+          \"actual80\":    { \"enabled\": true, \"operator\": \"GreaterThan\", \"threshold\": 80,  \"thresholdType\": \"Actual\",     \"contactEmails\": [\"${BUDGET_EMAIL}\"] },
+          \"actual100\":   { \"enabled\": true, \"operator\": \"GreaterThan\", \"threshold\": 100, \"thresholdType\": \"Actual\",     \"contactEmails\": [\"${BUDGET_EMAIL}\"] },
+          \"forecast100\": { \"enabled\": true, \"operator\": \"GreaterThan\", \"threshold\": 100, \"thresholdType\": \"Forecasted\", \"contactEmails\": [\"${BUDGET_EMAIL}\"] }
+        }
+      }
+    }"
+else
+  echo ">> Budget übersprungen (BUDGET_EMAIL nicht gesetzt)"
+fi
 
 FQDN=$(az containerapp show -n "$APP" -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
 
