@@ -14,6 +14,26 @@ Direktaufruf:
 curl -OJ "http://localhost:8080/convert?url=https://www.iski.app/track/view/5797606/78eb5c4d04295af1"
 ```
 
+## Batch: Textdatei mit URLs
+
+`urls.txt` – eine URL pro Zeile, `#` = Kommentar, Leerzeilen/Duplikate werden ignoriert.
+
+Lokal (Python ≥ 3.10):
+```bash
+pip install -r requirements.txt
+python cli.py urls.txt -o gpx/
+```
+
+Per Docker (gleiches Image, kein Python nötig):
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" \
+  ghcr.io/kurdem/iski2gpx python cli.py /data/urls.txt -o /data/gpx
+```
+`--user` sorgt dafür, dass die GPX-Dateien dir gehören (der Container läuft sonst als UID 10001).
+
+Optionen: `--delay 1` (Pause zwischen Abrufen in s), `--overwrite` (sonst `_2`, `_3` …).
+Fehlerhafte URLs werden übersprungen und am Ende gelistet; Exit-Code 1, wenn mindestens eine fehlschlug.
+
 ## Azure (Container Apps, Consumption, scale-to-zero)
 
 Architektur: GitHub Actions → Tests → Image nach `ghcr.io/kurdem/iski2gpx` → OIDC-Login → `az containerapp update`.
