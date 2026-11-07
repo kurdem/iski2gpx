@@ -1,0 +1,10 @@
+services:
+  iski2gpx:
+    build: .
+    image: iski2gpx:latest
+    container_name: iski2gpx
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - HTTP_TIMEOUT=20
