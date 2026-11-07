@@ -6,11 +6,24 @@ from xml.sax.saxutils import escape, quoteattr
 
 import requests
 from flask import Flask, Response, render_template_string, request
+from flask_limiter import Limiter
+from flask_limiter.errors import RateLimitExceeded
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 
 API_BASE = os.environ.get("ISKI_BASE", "https://www.iski.app")
 TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "20"))
+RATE_LIMIT = os.environ.get("RATE_LIMIT", "10 per minute")
+# Anzahl vertrauenswürdiger Reverse Proxies vor der App (Azure Container Apps: 1).
+# 0 = X-Forwarded-For ignorieren (lokaler Betrieb ohne Proxy).
+TRUSTED_PROXIES = int(os.environ.get("TRUSTED_PROXIES", "0"))
+if TRUSTED_PROXIES > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXIES, x_proto=TRUSTED_PROXIES)
+
+# In-Memory-Zähler: gilt pro Prozess -> 1 gunicorn-Worker und max. 1 Replica.
+limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
 URL_RE = re.compile(r"/track/view/(\d+)(?:/([0-9a-fA-F]+))?")
 
 PAGE = """<!doctype html>
@@ -33,7 +46,8 @@ PAGE = """<!doctype html>
 </form>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <p><small>Hinweis: Die öffentliche API liefert die vereinfachte Geometrie
-(ca. 1 Punkt / 10 s) inkl. Höhe und Zeitstempel.</small></p>
+(ca. 1 Punkt / 10 s) inkl. Höhe und Zeitstempel.<br>
+Kein offizieller Dienst von iSKI / Intermaps. Es werden keine Daten gespeichert.</small></p>
 </body></html>"""
 
 
@@ -109,7 +123,14 @@ def index():
     return render_template_string(PAGE, url=request.args.get("url"), error=None)
 
 
+@app.errorhandler(RateLimitExceeded)
+def rate_limited(_e):
+    msg = f"Zu viele Anfragen (Limit: {RATE_LIMIT} pro IP). Bitte kurz warten."
+    return render_template_string(PAGE, url=request.values.get("url"), error=msg), 429
+
+
 @app.route("/convert", methods=["GET", "POST"])
+@limiter.limit(lambda: RATE_LIMIT)
 def convert():
     url = request.values.get("url", "")
     try:
