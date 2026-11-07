@@ -44,6 +44,31 @@ Architektur: GitHub Actions → Tests → Image nach `ghcr.io/kurdem/iski2gpx` �
 
 Danach deployt jeder Push auf `main` automatisch.
 
+### Kill-Switch (optional)
+
+```bash
+BUDGET_EMAIL=ich@example.com BUDGET_AMOUNT=5 KILL_SWITCH=1 bash infra/setup-azure.sh
+# optional abweichende Schwelle in % der Ist-Kosten: KILL_THRESHOLD=120
+```
+
+Ablauf: Budget (Ist-Kosten ≥ `KILL_THRESHOLD` %) → Action Group `ag-iski2gpx-killswitch`
+→ Logic App `la-iski2gpx-killswitch` (Managed Identity, Contributor nur auf der Container App)
+→ `POST …/containerApps/iski2gpx/stop`.
+
+- Kostendaten kommen mit 8–24 h Verzögerung → kein Echtzeit-Limit.
+- Die App bleibt gestoppt, auch im Folgemonat, bis sie manuell gestartet wird.
+- Rechenkosten sind ohnehin durch max. 1 Replica à 0.25 vCPU/0.5 GiB begrenzt;
+  der Kill-Switch zielt auf Request-/Traffic-Kosten.
+
+```bash
+# Status
+az containerapp show -n iski2gpx -g rg-iski2gpx --query properties.runningStatus -o tsv
+# Wieder starten
+az rest --method post --url "https://management.azure.com$(az containerapp show -n iski2gpx -g rg-iski2gpx --query id -o tsv)/start?api-version=2024-03-01"
+```
+
+Test: Portal → Monitor → Action groups → `ag-iski2gpx-killswitch` → *Test* (stoppt die App wirklich).
+
 ### Konfiguration (Env-Variablen)
 
 | Variable | Default | Bedeutung |
@@ -71,6 +96,7 @@ Bei Scale-to-zero und geringem Traffic: ~0 €. Empfehlung: Budget-Alert auf der
 ```bash
 az group delete -n rg-iski2gpx --yes
 az ad app delete --id $(az ad app list --display-name gh-iski2gpx-deploy --query "[0].appId" -o tsv)
+# Kill-Switch (Logic App + Action Group) liegt in der Resource Group und wird mit gelöscht.
 ```
 
 ## Funktionsweise
